@@ -49,16 +49,13 @@ func fetchPeers(trackerData []byte) ([]string, error) {
 	return peers, nil
 }
 
-func ExtractPeers(data []TrackerState, info map[string]interface{}) ([]string, error) {
+func ExtractPeers(data []TrackerState, info map[string]interface{}, peerChan chan<- []string) error {
 	port := 6881
 	numwant := 50
 
-	resultChan := make(chan TrackerResult)
-	var allPeers []string
-
 	info_bencoded, err := bencode.Encode(info)
 	if err != nil {
-		return nil, fmt.Errorf("error encoding info dictionary: %v", err)
+		return fmt.Errorf("error encoding info dictionary: %v", err)
 	}
 
 	h := sha1.New()
@@ -86,13 +83,13 @@ func ExtractPeers(data []TrackerState, info map[string]interface{}) ([]string, e
 
 	for i := range data {
 		go func(t *TrackerState) {
-			fmt.Printf("Querying tracker: %s\n", t.URL)
 			var trackerRes []byte
 			var err error
 			if t.isQuerying || time.Now().Before(t.nextCheck) {
-				resultChan <- TrackerResult{URL: t.URL, Err: fmt.Errorf("Tracker not ready for querying")}
+				t.Err = fmt.Errorf("Tracker not ready for querying")
 				return
 			}
+			fmt.Printf("Querying tracker: %s\n", t.URL)
 			t.isQuerying = true
 			defer func() { t.isQuerying = false }()
 			if strings.HasPrefix(t.URL, "udp://") {
@@ -100,13 +97,13 @@ func ExtractPeers(data []TrackerState, info map[string]interface{}) ([]string, e
 			} else if strings.HasPrefix(t.URL, "http") {
 				trackerRes, err = requestHTTPTracker(t.URL, info_hash, peer_id, port, left, numwant)
 			} else {
-				resultChan <- TrackerResult{URL: t.URL, Err: fmt.Errorf("Unsupported tracker protocol")}
+				t.Err = fmt.Errorf("Unsupported tracker protocol")
 				return
 			}
 
 			if err != nil {
 				t.nextCheck = time.Now().Add(5 * time.Second)
-				resultChan <- TrackerResult{URL: t.URL, Err: err}
+				t.Err = fmt.Errorf("Error querying tracker: %v", err)
 				return
 			}
 
@@ -117,20 +114,14 @@ func ExtractPeers(data []TrackerState, info map[string]interface{}) ([]string, e
 			t.nextCheck = time.Now().Add(time.Duration(interval) * time.Second)
 
 			peers, err := fetchPeers(trackerRes)
-			resultChan <- TrackerResult{URL: t.URL, Peers: peers, Err: err}
+			if err != nil {
+				t.Err = fmt.Errorf("Error parsing tracker response: %v", err)
+				return
+			}
+			peerChan <- peers
 		}(&data[i])
 	}
-
-	for range data {
-		res := <-resultChan
-		if res.Err != nil {
-			fmt.Printf("Tracker %s failed: %v\n", res.URL, res.Err)
-			continue
-		}
-		fmt.Printf("Found %d peers from %s\n", len(res.Peers), res.URL)
-		allPeers = append(allPeers, res.Peers...)
-	}
-	return allPeers, nil
+	return nil
 }
 
 // ---------------------------------------------------------

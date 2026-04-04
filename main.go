@@ -14,6 +14,7 @@ type TrackerState struct {
 	URL        string
 	nextCheck  time.Time
 	isQuerying bool
+	Err        error
 }
 
 func main() {
@@ -64,9 +65,7 @@ func main() {
 	go RunTrackerManager(trackerData, info, peerChan)
 	for peers := range peerChan {
 		fmt.Printf("Received %d peers from tracker manager\n", len(peers))
-		for _, peer := range peers {
-			fmt.Println(peer)
-		}
+		fmt.Printf("Peers found: %v", peers)
 	}
 }
 
@@ -74,13 +73,9 @@ func RunTrackerManager(states []TrackerState, info map[string]any, peerChan chan
 	for {
 		fmt.Println("--- Tracker Manager Tick ---")
 
-		peers, err := ExtractPeers(states, info)
+		err := ExtractPeers(states, info, peerChan)
 		if err != nil {
 			fmt.Printf("Tracker manager encountered an error: %v\n", err)
-		}
-
-		if len(peers) > 0 {
-			peerChan <- peers
 		}
 
 		time.Sleep(5 * time.Second)
