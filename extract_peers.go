@@ -1,9 +1,7 @@
 package main
 
 import (
-	"Torrent/bencode"
 	"crypto/rand"
-	"crypto/sha1"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -22,7 +20,7 @@ type TrackerResult struct {
 }
 
 // Helper to escape binary data exactly how BitTorrent trackers expect
-func TrackerEscape(b []byte) string {
+func TrackerEscape(b [20]byte) string {
 	var s strings.Builder
 	for _, byteVal := range b {
 		if (byteVal >= 'a' && byteVal <= 'z') || (byteVal >= 'A' && byteVal <= 'Z') ||
@@ -49,18 +47,9 @@ func fetchPeers(trackerData []byte) ([]string, error) {
 	return peers, nil
 }
 
-func ExtractPeers(data []TrackerState, info map[string]interface{}, peerChan chan<- []string) error {
+func ExtractPeers(data []TrackerState, info map[string]interface{}, info_hash [20]byte, peer_id [20]byte, peerChan chan<- []string) error {
 	port := 6881
 	numwant := 50
-
-	info_bencoded, err := bencode.Encode(info)
-	if err != nil {
-		return fmt.Errorf("error encoding info dictionary: %v", err)
-	}
-
-	h := sha1.New()
-	h.Write(info_bencoded)
-	info_hash := h.Sum(nil)
 
 	var left int
 	if length, ok := info["length"].(int64); ok {
@@ -74,10 +63,6 @@ func ExtractPeers(data []TrackerState, info map[string]interface{}, peerChan cha
 			}
 		}
 	}
-
-	peer_id := make([]byte, 20)
-	copy(peer_id, []byte("-GO0001-"))
-	rand.Read(peer_id[8:])
 
 	fmt.Printf("Info hash: %x\n", info_hash)
 
@@ -127,7 +112,7 @@ func ExtractPeers(data []TrackerState, info map[string]interface{}, peerChan cha
 // ---------------------------------------------------------
 // HTTP HANDLER
 // ---------------------------------------------------------
-func requestHTTPTracker(announce_url string, info_hash, peer_id []byte, port, left, numwant int) ([]byte, error) {
+func requestHTTPTracker(announce_url string, info_hash [20]byte, peer_id [20]byte, port, left, numwant int) ([]byte, error) {
 	params := map[string]string{
 		"port":       strconv.Itoa(port),
 		"uploaded":   "0",
@@ -175,14 +160,13 @@ func requestHTTPTracker(announce_url string, info_hash, peer_id []byte, port, le
 // ---------------------------------------------------------
 // UDP HANDLER (BEP 15)
 // ---------------------------------------------------------
-func requestUDPTracker(announce_url string, info_hash, peer_id []byte, port, left, numwant int) ([]byte, error) {
+func requestUDPTracker(announce_url string, info_hash [20]byte, peer_id [20]byte, port, left, numwant int) ([]byte, error) {
 	parsedURL, err := url.Parse(announce_url)
 	if err != nil {
 		return nil, err
 	}
 
 	// 1. Open UDP Socket
-	// conn, err := net.DialTimeout("udp", parsedURL.Host, 5*time.Second)
 	udpAddr, err := net.ResolveUDPAddr("udp", parsedURL.Host)
 	if err != nil {
 		return nil, err
@@ -231,8 +215,8 @@ func requestUDPTracker(announce_url string, info_hash, peer_id []byte, port, lef
 	binary.BigEndian.PutUint64(annReq[0:8], connID)
 	binary.BigEndian.PutUint32(annReq[8:12], 1) // Action 1: Announce
 	binary.BigEndian.PutUint32(annReq[12:16], transIDUint)
-	copy(annReq[16:36], info_hash)
-	copy(annReq[36:56], peer_id)
+	copy(annReq[16:36], info_hash[:])
+	copy(annReq[36:56], peer_id[:])
 	binary.BigEndian.PutUint64(annReq[56:64], 0)            // Downloaded
 	binary.BigEndian.PutUint64(annReq[64:72], uint64(left)) // Left
 	binary.BigEndian.PutUint64(annReq[72:80], 0)            // Uploaded
