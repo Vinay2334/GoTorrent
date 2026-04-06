@@ -47,22 +47,9 @@ func fetchPeers(trackerData []byte) ([]string, error) {
 	return peers, nil
 }
 
-func ExtractPeers(data []TrackerState, info map[string]interface{}, info_hash [20]byte, peer_id [20]byte, peerChan chan<- []string) error {
+func ExtractPeers(data []TrackerState, left int, info_hash [20]byte, peer_id [20]byte, peerChan chan<- []string) error {
 	port := 6881
 	numwant := 50
-
-	var left int
-	if length, ok := info["length"].(int64); ok {
-		left = int(length)
-	} else if files, ok := info["files"].([]interface{}); ok {
-		for _, file := range files {
-			if fileDict, ok := file.(map[string]interface{}); ok {
-				if length, ok := fileDict["length"].(int64); ok {
-					left += int(length)
-				}
-			}
-		}
-	}
 
 	fmt.Printf("Info hash: %x\n", info_hash)
 

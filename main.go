@@ -77,14 +77,27 @@ func main() {
 	copy(peer_id[:], []byte("-GO0001-"))
 	rand.Read(peer_id[8:])
 
+	var left int
+	if length, ok := info["length"].(int64); ok {
+		left = int(length)
+	} else if files, ok := info["files"].([]interface{}); ok {
+		for _, file := range files {
+			if fileDict, ok := file.(map[string]interface{}); ok {
+				if length, ok := fileDict["length"].(int64); ok {
+					left += int(length)
+				}
+			}
+		}
+	}
+
 	peerChan := make(chan []string)
-	go RunTrackerManager(trackerData, info, info_hash, peer_id, peerChan)
+	go RunTrackerManager(trackerData, left, info_hash, peer_id, peerChan)
 	for peers := range peerChan {
 		fmt.Printf("Received %d peers from tracker manager\n", len(peers))
 		for _, peerAddr := range peers {
 			go func(addr string) {
 				fmt.Printf("Attempting handshake with peer: %s\n", addr)
-				err := StartPeerHandshake(addr, info_hash, peer_id)
+				err := StartPeerHandshake(addr, info_hash, peer_id, left)
 				if err != nil {
 					fmt.Printf("Handshake failed with peer %s: %v\n", addr, err)
 				}
@@ -93,11 +106,11 @@ func main() {
 	}
 }
 
-func RunTrackerManager(states []TrackerState, info map[string]any, info_hash [20]byte, peer_id [20]byte, peerChan chan<- []string) {
+func RunTrackerManager(states []TrackerState, left int, info_hash [20]byte, peer_id [20]byte, peerChan chan<- []string) {
 	for {
 		fmt.Println("--- Tracker Manager Tick ---")
 
-		err := ExtractPeers(states, info, info_hash, peer_id, peerChan)
+		err := ExtractPeers(states, left, info_hash, peer_id, peerChan)
 		if err != nil {
 			fmt.Printf("Tracker manager encountered an error: %v\n", err)
 		}
