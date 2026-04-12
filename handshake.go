@@ -78,11 +78,10 @@ func ReadMessage(r io.Reader) (*Message, error) {
 	return &Message{ID: MessageID(msgBuf[0]), Payload: msgBuf[1:]}, nil
 }
 
-func handlePeerMessages(conn net.Conn) {
+func handlePeerMessages(conn net.Conn, pm *utils.PieceManager) {
 	defer conn.Close()
 	choked := true
 	var peerBitField utils.BitField
-	var pm utils.PieceManager
 	for {
 		msg, err := ReadMessage(conn)
 		if err != nil {
@@ -99,7 +98,25 @@ func handlePeerMessages(conn net.Conn) {
 			choked = true
 			fmt.Println("Peer choked us")
 		case MsgUnchoke:
-			index, found = pm.PickPiece(peerBitField)
+			index, found := pm.PickPiece(peerBitField)
+			if found {
+				fmt.Printf("Peer unchoked us, requesting piece index %d\n", index)
+				for offset := int64(0); offset < pm.PieceLength; offset += 16384 {
+					blockSize := int64(16384)
+					if offset+blockSize > pm.PieceLength {
+						blockSize = pm.PieceLength - offset
+					}
+
+					request := make([]byte, 17)
+					binary.BigEndian.PutUint32(request[0:4], 13)
+					request[4] = byte(MsgRequest)
+					binary.BigEndian.PutUint32(request[5:9], uint32(index))
+					binary.BigEndian.PutUint32(request[9:13], uint32(offset))
+					binary.BigEndian.PutUint32(request[13:17], uint32(blockSize))
+
+					conn.Write(request)
+				}
+			}
 		case MsgHave:
 			index := int(binary.BigEndian.Uint32(msg.Payload))
 			peerBitField.SetPiece(index)
@@ -109,12 +126,12 @@ func handlePeerMessages(conn net.Conn) {
 		case MsgPiece:
 			fmt.Println("Received a block of data!")
 		}
-
+		fmt.Printf("My bitfield %v\n", peerBitField)
 		_ = choked
 	}
 }
 
-func StartPeerHandshake(addr string, infoHash [20]byte, peerID [20]byte, totalLength int) error {
+func StartPeerHandshake(addr string, infoHash [20]byte, peerID [20]byte, pm *utils.PieceManager) error {
 	conn, err := net.DialTimeout("tcp", addr, 5*time.Second)
 	if err != nil {
 		return fmt.Errorf("failed to connect to peer: %v", err)
@@ -143,7 +160,7 @@ func StartPeerHandshake(addr string, infoHash [20]byte, peerID [20]byte, totalLe
 		return fmt.Errorf("failed to send interested message: %v", err)
 	}
 
-	handlePeerMessages(conn)
+	handlePeerMessages(conn, pm)
 
 	fmt.Printf("Handshake successfull with peerId: %s \n", addr)
 	return nil

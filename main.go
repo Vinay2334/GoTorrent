@@ -2,6 +2,7 @@ package main
 
 import (
 	"Torrent/bencode"
+	"Torrent/utils"
 	"bufio"
 	"crypto/rand"
 	"crypto/sha1"
@@ -77,14 +78,14 @@ func main() {
 	copy(peer_id[:], []byte("-GO0001-"))
 	rand.Read(peer_id[8:])
 
-	var left int
+	var left int64
 	if length, ok := info["length"].(int64); ok {
-		left = int(length)
+		left = length
 	} else if files, ok := info["files"].([]interface{}); ok {
 		for _, file := range files {
 			if fileDict, ok := file.(map[string]interface{}); ok {
 				if length, ok := fileDict["length"].(int64); ok {
-					left += int(length)
+					left += length
 				}
 			}
 		}
@@ -92,12 +93,14 @@ func main() {
 
 	peerChan := make(chan []string)
 	go RunTrackerManager(trackerData, left, info_hash, peer_id, peerChan)
+
+	pm := utils.NewPieceManager(left, info["piece length"].(int64))
 	for peers := range peerChan {
 		fmt.Printf("Received %d peers from tracker manager\n", len(peers))
 		for _, peerAddr := range peers {
 			go func(addr string) {
 				fmt.Printf("Attempting handshake with peer: %s\n", addr)
-				err := StartPeerHandshake(addr, info_hash, peer_id, left)
+				err := StartPeerHandshake(addr, info_hash, peer_id, pm)
 				if err != nil {
 					fmt.Printf("Handshake failed with peer %s: %v\n", addr, err)
 				}
@@ -106,7 +109,7 @@ func main() {
 	}
 }
 
-func RunTrackerManager(states []TrackerState, left int, info_hash [20]byte, peer_id [20]byte, peerChan chan<- []string) {
+func RunTrackerManager(states []TrackerState, left int64, info_hash [20]byte, peer_id [20]byte, peerChan chan<- []string) {
 	for {
 		fmt.Println("--- Tracker Manager Tick ---")
 

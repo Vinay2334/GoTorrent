@@ -47,7 +47,7 @@ func fetchPeers(trackerData []byte) ([]string, error) {
 	return peers, nil
 }
 
-func ExtractPeers(data []TrackerState, left int, info_hash [20]byte, peer_id [20]byte, peerChan chan<- []string) error {
+func ExtractPeers(data []TrackerState, left int64, info_hash [20]byte, peer_id [20]byte, peerChan chan<- []string) error {
 	port := 6881
 	numwant := 50
 
@@ -99,7 +99,7 @@ func ExtractPeers(data []TrackerState, left int, info_hash [20]byte, peer_id [20
 // ---------------------------------------------------------
 // HTTP HANDLER
 // ---------------------------------------------------------
-func requestHTTPTracker(announce_url string, info_hash [20]byte, peer_id [20]byte, port, left, numwant int) ([]byte, error) {
+func requestHTTPTracker(announce_url string, info_hash [20]byte, peer_id [20]byte, port int, left int64, numwant int) ([]byte, error) {
 	params := map[string]string{
 		"port":       strconv.Itoa(port),
 		"uploaded":   "0",
@@ -147,7 +147,7 @@ func requestHTTPTracker(announce_url string, info_hash [20]byte, peer_id [20]byt
 // ---------------------------------------------------------
 // UDP HANDLER (BEP 15)
 // ---------------------------------------------------------
-func requestUDPTracker(announce_url string, info_hash [20]byte, peer_id [20]byte, port, left, numwant int) ([]byte, error) {
+func requestUDPTracker(announce_url string, info_hash [20]byte, peer_id [20]byte, port int, left int64, numwant int) ([]byte, error) {
 	parsedURL, err := url.Parse(announce_url)
 	if err != nil {
 		return nil, err
