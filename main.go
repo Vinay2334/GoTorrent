@@ -6,11 +6,11 @@ import (
 	"bufio"
 	"crypto/rand"
 	"crypto/sha1"
-	"time"
-
-	// "encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
+	"time"
+	// "encoding/json"
 )
 
 type TrackerState struct {
@@ -93,14 +93,15 @@ func main() {
 
 	peerChan := make(chan []string)
 	go RunTrackerManager(trackerData, left, info_hash, peer_id, peerChan)
-
 	pm := utils.NewPieceManager(left, info["piece length"].(int64))
+	downloadsPath := filepath.Join(os.Getenv("USERPROFILE"), "Downloads")
+	fm := utils.NewFileManager(info["files"].([]any), downloadsPath)
 	for peers := range peerChan {
 		fmt.Printf("Received %d peers from tracker manager\n", len(peers))
 		for _, peerAddr := range peers {
 			go func(addr string) {
 				fmt.Printf("Attempting handshake with peer: %s\n", addr)
-				err := StartPeerHandshake(addr, info_hash, peer_id, pm)
+				err := StartPeerHandshake(addr, info_hash, peer_id, pm, fm)
 				if err != nil {
 					fmt.Printf("Handshake failed with peer %s: %v\n", addr, err)
 				}
@@ -118,7 +119,7 @@ func RunTrackerManager(states []TrackerState, left int64, info_hash [20]byte, pe
 			fmt.Printf("Tracker manager encountered an error: %v\n", err)
 		}
 
-		time.Sleep(5 * time.Second)
+		time.Sleep(900 * time.Second)
 	}
 }
 

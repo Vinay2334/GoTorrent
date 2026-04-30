@@ -86,6 +86,7 @@ func ExtractPeers(data []TrackerState, left int64, info_hash [20]byte, peer_id [
 			t.nextCheck = time.Now().Add(time.Duration(interval) * time.Second)
 
 			peers, err := fetchPeers(trackerRes)
+			fmt.Printf("Extracted %d peers from tracker %s\n", len(peers), t.URL)
 			if err != nil {
 				t.Err = fmt.Errorf("Error parsing tracker response: %v", err)
 				return
@@ -113,14 +114,12 @@ func requestHTTPTracker(announce_url string, info_hash [20]byte, peer_id [20]byt
 	var query_parts []string
 	query_parts = append(query_parts, "info_hash="+TrackerEscape(info_hash))
 	query_parts = append(query_parts, "peer_id="+TrackerEscape(peer_id))
-	fmt.Printf("Query parts: %v\n", query_parts)
 
 	for key, value := range params {
 		query_parts = append(query_parts, fmt.Sprintf("%s=%s", key, url.QueryEscape(value)))
 	}
 
 	query_string := strings.Join(query_parts, "&")
-	fmt.Printf("Full query string: %s\n", query_string)
 
 	if strings.Contains(announce_url, "?") {
 		announce_url += "&" + query_string
