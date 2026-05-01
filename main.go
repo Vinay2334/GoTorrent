@@ -6,11 +6,12 @@ import (
 	"bufio"
 	"crypto/rand"
 	"crypto/sha1"
+
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"time"
-	// "encoding/json"
 )
 
 type TrackerState struct {
@@ -36,8 +37,8 @@ func main() {
 		return
 	}
 
-	// prettyJSON, _ := json.MarshalIndent(data, "", "  ")
-	// fmt.Println(string(prettyJSON))
+	prettyJSON, _ := json.MarshalIndent(data, "", "  ")
+	fmt.Println(string(prettyJSON))
 
 	announce_list, ok := data["announce-list"].([]interface{})
 	if !ok {
@@ -94,7 +95,14 @@ func main() {
 	peerChan := make(chan []string)
 	go RunTrackerManager(trackerData, left, info_hash, peer_id, peerChan)
 	pm := utils.NewPieceManager(left, info["piece length"].(int64))
-	downloadsPath := filepath.Join(os.Getenv("USERPROFILE"), "Downloads")
+
+	hashes, err := extractHashes([]byte(info["pieces"].(string)), left, info["piece length"].(int64))
+	if err != nil {
+		panic(fmt.Errorf("error extracting piece hashes: %v", err))
+	}
+	copy(pm.Hashes, hashes)
+
+	downloadsPath := filepath.Join(os.Getenv("USERPROFILE"), "Downloads", info["name"].(string))
 	fm := utils.NewFileManager(info["files"].([]any), downloadsPath)
 	for peers := range peerChan {
 		fmt.Printf("Received %d peers from tracker manager\n", len(peers))
@@ -137,4 +145,22 @@ func extractUrls(announceList []interface{}) ([]string, error) {
 		}
 	}
 	return urls, nil
+}
+
+func extractHashes(rawPieces []byte, totalLength, pieceLength int64) ([][20]byte, error) {
+	if len(rawPieces)%20 != 0 {
+		return nil, fmt.Errorf("invalid pieces length: must be multiple of 20")
+	}
+
+	numPieces := (totalLength + pieceLength - 1) / pieceLength
+	if int64(len(rawPieces)) != numPieces*20 {
+		return nil, fmt.Errorf("pieces length does not match expected number of pieces")
+	}
+	hashes := make([][20]byte, numPieces)
+
+	for i := 0; i < int(numPieces); i++ {
+		copy(hashes[i][:], rawPieces[i*20:(i+1)*20])
+	}
+
+	return hashes, nil
 }

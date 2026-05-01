@@ -11,7 +11,6 @@ type FileInfo struct {
 	Path   string
 	Length int64
 	Offset int64
-	Data   []byte
 }
 
 type FileManager struct {
@@ -72,7 +71,6 @@ func (fm *FileManager) WritePiece(pieceIndex int, pieceLength int64, data []byte
 			fileOffset := writeStart - file.Offset
 			bytesToWrite := writeEnd - writeStart
 
-			file.Data = append(file.Data, data[dataOffset:dataOffset+bytesToWrite]...)
 			err := fm.writeToDisk(file.Path, data[dataOffset:dataOffset+bytesToWrite], fileOffset)
 			if err != nil {
 				return err

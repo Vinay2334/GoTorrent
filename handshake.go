@@ -82,70 +82,84 @@ func handlePeerMessages(conn net.Conn, pm *utils.PieceManager, fm *utils.FileMan
 	defer conn.Close()
 	choked := true
 	var peerBitField utils.BitField
+
+	ticker := time.NewTicker(2 * time.Minute)
+	defer ticker.Stop()
+
 	for {
-		msg, err := ReadMessage(conn)
-		if err != nil {
-			fmt.Printf("Error reading message from peer: %v\n", err)
-			return
-		}
-
-		if msg == nil {
-			continue
-		}
-
-		switch msg.ID {
-		case MsgChoke:
-			choked = true
-			fmt.Println("Peer choked us")
-		case MsgUnchoke:
-			index, found := pm.PickPiece(peerBitField)
-			if found {
-				fmt.Printf("Peer unchoked us, requesting piece index %d\n", index)
-				for offset := int64(0); offset < pm.PieceLength; offset += 16384 {
-					blockSize := int64(16384)
-					if offset+blockSize > pm.PieceLength {
-						blockSize = pm.PieceLength - offset
-					}
-
-					request := make([]byte, 17)
-					binary.BigEndian.PutUint32(request[0:4], 13)
-					request[4] = byte(MsgRequest)
-					binary.BigEndian.PutUint32(request[5:9], uint32(index))
-					binary.BigEndian.PutUint32(request[9:13], uint32(offset))
-					binary.BigEndian.PutUint32(request[13:17], uint32(blockSize))
-
-					conn.Write(request)
-				}
+		select {
+		case <-ticker.C: // Send keep-alive every 2 minutes
+			fmt.Printf("Sending keep-alive to peer %s\n", conn.RemoteAddr())
+			_, err := conn.Write([]byte{0, 0, 0, 0})
+			if err != nil {
+				fmt.Printf("Error sending keep-alive: %v\n", err)
+				return
 			}
-		case MsgHave:
-			index := int(binary.BigEndian.Uint32(msg.Payload))
-			peerBitField.SetPiece(index)
-		case MsgBitfield:
-			peerBitField = utils.BitField(msg.Payload)
-			fmt.Printf("Received bitfield (length %d)\n", len(peerBitField))
-		case MsgPiece:
-			if len(msg.Payload) < 8 {
-				fmt.Println("Payload too short for piece message")
+		default:
+			msg, err := ReadMessage(conn)
+			if err != nil {
+				fmt.Printf("Error reading message from peer: %v\n", err)
+				return
+			}
+
+			if msg == nil {
 				continue
 			}
 
-			index := binary.BigEndian.Uint32(msg.Payload[0:4])
-			begin := binary.BigEndian.Uint32(msg.Payload[4:8])
-			block := msg.Payload[8:]
-			fmt.Printf("Received piece index %d, begin %d, block length %d\n", index, begin, len(block))
+			switch msg.ID {
+			case MsgChoke:
+				choked = true
+				fmt.Println("Peer choked us")
+			case MsgUnchoke:
+				index, found := pm.PickPiece(peerBitField)
+				if found {
+					fmt.Printf("Peer unchoked us, requesting piece index %d\n", index)
+					for offset := int64(0); offset < pm.PieceLength; offset += 16384 {
+						blockSize := int64(16384)
+						if offset+blockSize > pm.PieceLength {
+							blockSize = pm.PieceLength - offset
+						}
 
-			data, complete := pm.AddBlock(int(index), int(begin), block)
-			if complete {
-				fmt.Printf("Completed piece index %d\n", index)
-				err := fm.WritePiece(int(index), pm.PieceLength, data)
-				if err != nil {
-					fmt.Printf("Error writing piece to disk: %v\n", err)
+						request := make([]byte, 17)
+						binary.BigEndian.PutUint32(request[0:4], 13)
+						request[4] = byte(MsgRequest)
+						binary.BigEndian.PutUint32(request[5:9], uint32(index))
+						binary.BigEndian.PutUint32(request[9:13], uint32(offset))
+						binary.BigEndian.PutUint32(request[13:17], uint32(blockSize))
+
+						conn.Write(request)
+					}
 				}
-				pm.MarkPieceFinished(int(index))
-				fmt.Printf("My bitfield after completing piece %d: %v\n", index, pm.MyBitfield)
+			case MsgHave:
+				index := int(binary.BigEndian.Uint32(msg.Payload))
+				peerBitField.SetPiece(index)
+			case MsgBitfield:
+				peerBitField = utils.BitField(msg.Payload)
+				fmt.Printf("Received bitfield (length %d)\n", len(peerBitField))
+			case MsgPiece:
+				if len(msg.Payload) < 8 {
+					fmt.Println("Payload too short for piece message")
+					continue
+				}
+
+				index := binary.BigEndian.Uint32(msg.Payload[0:4])
+				begin := binary.BigEndian.Uint32(msg.Payload[4:8])
+				block := msg.Payload[8:]
+				fmt.Printf("Received piece index %d, begin %d, block length %d\n", index, begin, len(block))
+
+				data, complete := pm.AddBlock(int(index), int(begin), block)
+				if complete {
+					fmt.Printf("Completed piece index %d\n", index)
+					err := fm.WritePiece(int(index), pm.PieceLength, data)
+					if err != nil {
+						fmt.Printf("Error writing piece to disk: %v\n", err)
+					}
+					pm.MarkPieceFinished(int(index))
+					fmt.Printf("My bitfield after completing piece %d: %v\n", index, pm.MyBitfield)
+				}
 			}
+			_ = choked
 		}
-		_ = choked
 	}
 }
 

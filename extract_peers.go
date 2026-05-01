@@ -34,6 +34,20 @@ func TrackerEscape(b [20]byte) string {
 }
 
 func fetchPeers(trackerData []byte) ([]string, error) {
+	if len(trackerData) < 8 {
+		return nil, fmt.Errorf("tracker response too short: %d bytes", len(trackerData))
+	}
+
+	action := binary.BigEndian.Uint32(trackerData[0:4])
+
+	if action == 3 {
+		errorMsg := string(trackerData[8:])
+		return nil, fmt.Errorf("tracker returned error: %s", errorMsg)
+	}
+
+	if len(trackerData) < 20 {
+		return nil, fmt.Errorf("announce response too short to contain header")
+	}
 	var peers []string
 	peerData := trackerData[20:] // Skip the 20-byte header
 	for i := 0; i+6 <= len(peerData); i += 6 {
@@ -152,6 +166,10 @@ func requestUDPTracker(announce_url string, info_hash [20]byte, peer_id [20]byte
 		return nil, err
 	}
 
+	transID := make([]byte, 4)
+	rand.Read(transID)
+	transIDUint := binary.BigEndian.Uint32(transID)
+
 	// 1. Open UDP Socket
 	udpAddr, err := net.ResolveUDPAddr("udp", parsedURL.Host)
 	if err != nil {
@@ -166,31 +184,15 @@ func requestUDPTracker(announce_url string, info_hash [20]byte, peer_id [20]byte
 	conn.SetDeadline(time.Now().Add(5 * time.Second))
 	defer conn.Close()
 
-	// Generate a random transaction ID
-	transID := make([]byte, 4)
-	rand.Read(transID)
-	transIDUint := binary.BigEndian.Uint32(transID)
-
 	// 2. CONNECTION REQUEST
 	connReq := make([]byte, 16)
 	binary.BigEndian.PutUint64(connReq[0:8], 0x41727101980) // Magic constant for connection
 	binary.BigEndian.PutUint32(connReq[8:12], 0)            // Action 0: Connect
 	binary.BigEndian.PutUint32(connReq[12:16], transIDUint)
 
-	// 3. Write specifically to that address
-	if _, err = conn.Write(connReq); err != nil {
-		return nil, fmt.Errorf("error sending connection request: %v", err)
-	}
-
-	connResp := make([]byte, 16)
-	_, err = conn.Read(connResp)
+	connResp, err := retryUDP(conn, connReq, 0, transIDUint)
 	if err != nil {
 		return nil, fmt.Errorf("error during connection handshake: %v", err)
-	}
-
-	// Check if action and transaction ID match
-	if binary.BigEndian.Uint32(connResp[0:4]) != 0 || binary.BigEndian.Uint32(connResp[4:8]) != transIDUint {
-		return nil, fmt.Errorf("invalid connection response")
 	}
 
 	connID := binary.BigEndian.Uint64(connResp[8:16])
@@ -212,18 +214,51 @@ func requestUDPTracker(announce_url string, info_hash [20]byte, peer_id [20]byte
 	binary.BigEndian.PutUint32(annReq[92:96], ^uint32(0))   // Num want
 	binary.BigEndian.PutUint16(annReq[96:98], uint16(port)) // Port
 
-	if _, err = conn.Write(annReq); err != nil {
+	annResp, err := retryUDP(conn, annReq, 1, transIDUint)
+	if err != nil {
 		return nil, fmt.Errorf("error sending announce request: %v", err)
 	}
 
-	// Read Announce Response (20 bytes header + 6 bytes per peer)
-	annResp := make([]byte, 2048)
-	n, err := conn.Read(annResp)
-	if err != nil {
-		return nil, fmt.Errorf("error reading announce response: %v", err)
+	return annResp, nil
+}
+
+func retryUDP(conn *net.UDPConn, request []byte, expectedAction uint32, transID uint32) ([]byte, error) {
+	var lastErr error
+	// Official BEP 15: retry up to 8 times (n=0 to 8)
+	for n := 0; n <= 8; n++ {
+		timeout := time.Duration(15*(1<<uint(n))) * time.Second
+		conn.SetDeadline(time.Now().Add(timeout))
+
+		if _, err := conn.Write(request); err != nil {
+			lastErr = err
+			continue
+		}
+
+		buf := make([]byte, 2048)
+		nRead, err := conn.Read(buf)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+
+		if nRead < 8 {
+			lastErr = fmt.Errorf("response too short")
+			continue
+		}
+
+		action := binary.BigEndian.Uint32(buf[0:4])
+		respTransID := binary.BigEndian.Uint32(buf[4:8])
+
+		if action == 3 {
+			return nil, fmt.Errorf("tracker error: %s", string(buf[8:nRead]))
+		}
+
+		if action != expectedAction || respTransID != transID {
+			lastErr = fmt.Errorf("mismatched action or transaction ID")
+			continue
+		}
+
+		return buf[:nRead], nil
 	}
-	if n < 20 || binary.BigEndian.Uint32(annResp[0:4]) != 1 || binary.BigEndian.Uint32(annResp[4:8]) != transIDUint {
-		return nil, fmt.Errorf("invalid announce response")
-	}
-	return annResp[:n], nil
+	return nil, fmt.Errorf("timeout after 8 retries: %v", lastErr)
 }

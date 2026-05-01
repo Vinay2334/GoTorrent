@@ -1,6 +1,8 @@
 package utils
 
 import (
+	"crypto/sha1"
+	"fmt"
 	"sync"
 )
 
@@ -22,6 +24,7 @@ type PieceManager struct {
 	Mu            sync.Mutex
 	Buffers       map[int][]byte
 	DownloadedAmt map[int]int64
+	Hashes        [][20]byte
 }
 
 func NewPieceManager(totalLength, pieceLength int64) *PieceManager {
@@ -34,6 +37,7 @@ func NewPieceManager(totalLength, pieceLength int64) *PieceManager {
 		Statuses:      make([]PieceStatus, numPieces),
 		Buffers:       make(map[int][]byte),
 		DownloadedAmt: make(map[int]int64),
+		Hashes:        make([][20]byte, numPieces),
 	}
 }
 
@@ -63,6 +67,13 @@ func (pm *PieceManager) AddBlock(index int, offset int, block []byte) ([]byte, b
 
 	if pm.DownloadedAmt[index] == pm.GetPieceLength(index) {
 		data := pm.Buffers[index]
+
+		hash := sha1.Sum(data)
+		if hash != pm.Hashes[index] {
+			fmt.Printf("Hash mismatch for piece %d: expected %x, got %x\n", index, pm.Hashes[index], hash)
+			return nil, false
+		}
+
 		delete(pm.Buffers, index)
 		delete(pm.DownloadedAmt, index)
 		return data, true
