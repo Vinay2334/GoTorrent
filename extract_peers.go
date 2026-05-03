@@ -62,7 +62,7 @@ func fetchPeers(trackerData []byte) ([]string, error) {
 }
 
 func ExtractPeers(data []TrackerState, left int64, info_hash [20]byte, peer_id [20]byte, peerChan chan<- []string) error {
-	port := 6881
+	port := 54321
 	numwant := 50
 
 	fmt.Printf("Info hash: %x\n", info_hash)

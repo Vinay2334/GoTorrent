@@ -94,16 +94,18 @@ func main() {
 
 	peerChan := make(chan []string)
 	go RunTrackerManager(trackerData, left, info_hash, peer_id, peerChan)
-	pm := utils.NewPieceManager(left, info["piece length"].(int64))
 
 	hashes, err := extractHashes([]byte(info["pieces"].(string)), left, info["piece length"].(int64))
 	if err != nil {
 		panic(fmt.Errorf("error extracting piece hashes: %v", err))
 	}
-	copy(pm.Hashes, hashes)
+	pm := utils.NewPieceManager(left, info["piece length"].(int64), hashes)
 
 	downloadsPath := filepath.Join(os.Getenv("USERPROFILE"), "Downloads", info["name"].(string))
 	fm := utils.NewFileManager(info["files"].([]any), downloadsPath)
+	pm.BuildBitField(fm, downloadsPath)
+	fmt.Printf("Initial bitfield: %v\n", pm.MyBitfield)
+
 	for peers := range peerChan {
 		fmt.Printf("Received %d peers from tracker manager\n", len(peers))
 		for _, peerAddr := range peers {

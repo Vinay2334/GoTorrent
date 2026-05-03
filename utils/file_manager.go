@@ -97,3 +97,43 @@ func (fm *FileManager) writeToDisk(path string, data []byte, offset int64) error
 	_, err = f.WriteAt(data, offset)
 	return err
 }
+
+func (fm *FileManager) ReadPiece(index int, pieceLength int64, downloadsPath string) ([]byte, error) {
+	pieceStart := int64(index) * pieceLength
+	pieceEnd := pieceStart + pieceLength
+
+	pieceData := make([]byte, 0, pieceLength)
+
+	var currentOffset int64 = 0
+	for _, f := range fm.Files {
+		fileStart := currentOffset
+		fileEnd := currentOffset + f.Length
+
+		if pieceStart < fileEnd && pieceEnd > fileStart {
+			readStart := max(pieceStart, fileStart) - fileStart
+			readEnd := min(pieceEnd, fileEnd) - fileStart
+
+			fPath := filepath.Join(downloadsPath, f.Path)
+
+			data, err := fm.readFileRange(fPath, readStart, readEnd-readStart)
+			if err != nil {
+				return nil, err
+			}
+			pieceData = append(pieceData, data...)
+		}
+		currentOffset += f.Length
+	}
+	return pieceData, nil
+}
+
+func (fm *FileManager) readFileRange(path string, offset int64, length int64) ([]byte, error) {
+	file, err := os.OpenFile(path, os.O_RDONLY, 0644)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	buf := make([]byte, length)
+	_, err = file.ReadAt(buf, offset)
+	return buf, err
+}
