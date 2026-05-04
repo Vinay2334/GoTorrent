@@ -7,7 +7,7 @@ import (
 	"crypto/rand"
 	"crypto/sha1"
 
-	"encoding/json"
+	// "encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -22,7 +22,7 @@ type TrackerState struct {
 }
 
 func main() {
-	file, err := os.Open("test2.torrent")
+	file, err := os.Open("photo.torrent")
 	if err != nil {
 		fmt.Println("Error opening file:", err)
 		return
@@ -37,8 +37,8 @@ func main() {
 		return
 	}
 
-	prettyJSON, _ := json.MarshalIndent(data, "", "  ")
-	fmt.Println(string(prettyJSON))
+	// prettyJSON, _ := json.MarshalIndent(data, "", "  ")
+	// fmt.Println(string(prettyJSON))
 
 	announce_list, ok := data["announce-list"].([]interface{})
 	if !ok {
@@ -111,7 +111,7 @@ func main() {
 		for _, peerAddr := range peers {
 			go func(addr string) {
 				fmt.Printf("Attempting handshake with peer: %s\n", addr)
-				err := StartPeerHandshake(addr, info_hash, peer_id, pm, fm)
+				err := StartPeerHandshake(addr, info_hash, peer_id, pm, fm, peerChan)
 				if err != nil {
 					fmt.Printf("Handshake failed with peer %s: %v\n", addr, err)
 				}
