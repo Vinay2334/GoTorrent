@@ -96,9 +96,9 @@ func (pm *PieceManager) MarkPieceFinished(index int) {
 	pm.MyBitfield.SetPiece(index)
 }
 
-func (pm *PieceManager) BuildBitField(fm *FileManager, downloadsPath string) {
+func (pm *PieceManager) BuildBitField(fm *FileManager) {
 	for i := 0; i < int(pm.TotalPieces); i++ {
-		data, err := fm.ReadPiece(i, pm.PieceLength, downloadsPath)
+		data, err := fm.ReadPiece(i, pm.PieceLength, 0)
 		if err != nil {
 			continue
 		}

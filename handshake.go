@@ -106,10 +106,9 @@ func pexMessage() []byte {
 	return extMsg
 }
 
-func handlePeerMessages(conn net.Conn, pm *utils.PieceManager, fm *utils.FileManager, peerChan chan<- []string) {
+func handlePeerMessages(conn net.Conn, pm *utils.PieceManager, fm *utils.FileManager, peerChan chan<- []string, swarm *utils.Swarm) {
 	defer conn.Close()
 	choked := true
-	var peerBitField utils.BitField
 
 	ticker := time.NewTicker(2 * time.Minute)
 	defer ticker.Stop()
@@ -141,7 +140,7 @@ func handlePeerMessages(conn net.Conn, pm *utils.PieceManager, fm *utils.FileMan
 				choked = true
 				fmt.Println("Peer choked us")
 			case MsgUnchoke:
-				index, found := pm.PickPiece(peerBitField)
+				index, found := pm.PickPiece(swarm.Peers[conn.RemoteAddr().String()].BitField)
 				if found {
 					fmt.Printf("Peer unchoked us, requesting piece index %d\n", index)
 					for offset := int64(0); offset < pm.PieceLength; offset += 16384 {
@@ -162,10 +161,9 @@ func handlePeerMessages(conn net.Conn, pm *utils.PieceManager, fm *utils.FileMan
 				}
 			case MsgHave:
 				index := int(binary.BigEndian.Uint32(msg.Payload))
-				peerBitField.SetPiece(index)
+				swarm.Peers[conn.RemoteAddr().String()].BitField.SetPiece(index)
 			case MsgBitfield:
-				peerBitField = utils.BitField(msg.Payload)
-				fmt.Printf("Received bitfield (length %d)\n", len(peerBitField))
+				swarm.Peers[conn.RemoteAddr().String()].BitField = utils.BitField(msg.Payload)
 			case MsgPiece:
 				if len(msg.Payload) < 8 {
 					fmt.Println("Payload too short for piece message")
@@ -232,13 +230,49 @@ func handlePeerMessages(conn net.Conn, pm *utils.PieceManager, fm *utils.FileMan
 						}
 					}
 				}
+
+			case MsgInterested:
+				swarm.SetMsgState(conn.RemoteAddr().String(), utils.MsgInterested, true)
+				if swarm.CountUnchoked() < 4 {
+					fmt.Println("Peer is interested, sending unchoke")
+					unchokeMsg := []byte{0, 0, 0, 1, byte(utils.MsgUnchoke)}
+					conn.Write(unchokeMsg)
+					swarm.SetMsgState(conn.RemoteAddr().String(), utils.MsgUnchoke, false)
+				}
+
+			case MsgRequest:
+				if len(msg.Payload) < 12 {
+					continue
+				}
+				index := binary.BigEndian.Uint32(msg.Payload[0:4])
+				begin := binary.BigEndian.Uint32(msg.Payload[4:8])
+				length := binary.BigEndian.Uint32(msg.Payload[8:12])
+				fmt.Printf("Received request for piece index %d, begin %d, length %d\n", index, begin, length)
+
+				block, err := fm.ReadPiece(int(index), int64(length), int64(begin))
+				if err != nil {
+					fmt.Printf("Error reading piece for request: %v\n", err)
+					continue
+				}
+
+				// Length= 9 (ID + Index + Begin) + len(block)
+				resLen := 9 + uint32(len(block))
+				buf := make([]byte, 4+resLen)
+				binary.BigEndian.PutUint32(buf[0:4], resLen)
+				buf[4] = byte(MsgPiece)
+				binary.BigEndian.PutUint32(buf[5:9], index)
+				binary.BigEndian.PutUint32(buf[9:13], begin)
+				copy(buf[13:], block)
+
+				fmt.Printf("Sending piece index %d, begin %d, block length %d\n", index, begin, len(block))
+				conn.Write(buf)
 			}
 			_ = choked
 		}
 	}
 }
 
-func StartPeerHandshake(addr string, infoHash [20]byte, peerID [20]byte, pm *utils.PieceManager, fm *utils.FileManager, peerChan chan<- []string) error {
+func StartPeerHandshake(addr string, infoHash [20]byte, peerID [20]byte, pm *utils.PieceManager, fm *utils.FileManager, peerChan chan<- []string, swarm *utils.Swarm) error {
 	conn, err := net.DialTimeout("tcp", addr, 5*time.Second)
 	if err != nil {
 		return fmt.Errorf("failed to connect to peer: %v", err)
@@ -280,7 +314,10 @@ func StartPeerHandshake(addr string, infoHash [20]byte, peerID [20]byte, pm *uti
 		return fmt.Errorf("failed to send interested message: %v", err)
 	}
 
-	handlePeerMessages(conn, pm, fm, peerChan)
+	swarm.AddPeer(addr, conn)
+	defer swarm.RemovePeer(addr)
+
+	handlePeerMessages(conn, pm, fm, peerChan, swarm)
 
 	fmt.Printf("Handshake successfull with peerId: %s \n", addr)
 	return nil

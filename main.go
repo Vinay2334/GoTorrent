@@ -22,7 +22,7 @@ type TrackerState struct {
 }
 
 func main() {
-	file, err := os.Open("photo.torrent")
+	file, err := os.Open("test3.torrent")
 	if err != nil {
 		fmt.Println("Error opening file:", err)
 		return
@@ -93,6 +93,7 @@ func main() {
 	}
 
 	peerChan := make(chan []string)
+	swarm := utils.NewSwarm(info_hash, peer_id)
 	go RunTrackerManager(trackerData, left, info_hash, peer_id, peerChan)
 
 	hashes, err := extractHashes([]byte(info["pieces"].(string)), left, info["piece length"].(int64))
@@ -103,7 +104,7 @@ func main() {
 
 	downloadsPath := filepath.Join(os.Getenv("USERPROFILE"), "Downloads", info["name"].(string))
 	fm := utils.NewFileManager(info["files"].([]any), downloadsPath)
-	pm.BuildBitField(fm, downloadsPath)
+	pm.BuildBitField(fm)
 	fmt.Printf("Initial bitfield: %v\n", pm.MyBitfield)
 
 	for peers := range peerChan {
@@ -111,10 +112,14 @@ func main() {
 		for _, peerAddr := range peers {
 			go func(addr string) {
 				fmt.Printf("Attempting handshake with peer: %s\n", addr)
-				err := StartPeerHandshake(addr, info_hash, peer_id, pm, fm, peerChan)
-				if err != nil {
-					fmt.Printf("Handshake failed with peer %s: %v\n", addr, err)
+				if swarm.Peers[addr] == nil {
+					fmt.Printf("Peer %s is new, starting handshake\n", addr)
+					err := StartPeerHandshake(addr, info_hash, peer_id, pm, fm, peerChan, swarm)
+					if err != nil {
+						fmt.Printf("Handshake failed with peer %s: %v\n", addr, err)
+					}
 				}
+				fmt.Printf("Peers in the swarm: %d\n", len(swarm.Peers))
 			}(peerAddr)
 		}
 	}

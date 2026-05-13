@@ -14,9 +14,10 @@ type FileInfo struct {
 }
 
 type FileManager struct {
-	Files   []FileInfo
-	BaseDir string
-	Mu      sync.Mutex
+	Files         []FileInfo
+	BaseDir       string
+	Mu            sync.Mutex
+	downloadsPath string
 }
 
 func NewFileManager(fileData []any, baseDir string) *FileManager {
@@ -98,8 +99,8 @@ func (fm *FileManager) writeToDisk(path string, data []byte, offset int64) error
 	return err
 }
 
-func (fm *FileManager) ReadPiece(index int, pieceLength int64, downloadsPath string) ([]byte, error) {
-	pieceStart := int64(index) * pieceLength
+func (fm *FileManager) ReadPiece(index int, pieceLength int64, begin int64) ([]byte, error) {
+	pieceStart := int64(index)*pieceLength + begin
 	pieceEnd := pieceStart + pieceLength
 
 	pieceData := make([]byte, 0, pieceLength)
@@ -113,7 +114,7 @@ func (fm *FileManager) ReadPiece(index int, pieceLength int64, downloadsPath str
 			readStart := max(pieceStart, fileStart) - fileStart
 			readEnd := min(pieceEnd, fileEnd) - fileStart
 
-			fPath := filepath.Join(downloadsPath, f.Path)
+			fPath := filepath.Join(fm.BaseDir, f.Path)
 
 			data, err := fm.readFileRange(fPath, readStart, readEnd-readStart)
 			if err != nil {
