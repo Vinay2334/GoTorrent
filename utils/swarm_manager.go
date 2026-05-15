@@ -61,7 +61,7 @@ func NewSwarm(infoHash [20]byte, peerID [20]byte) *Swarm {
 func (s *Swarm) AddPeer(addr string, conn net.Conn) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.Peers[addr] = &PeerState{Addr: addr, Conn: conn, AmInterested: false, AmChoking: true}
+	s.Peers[addr] = &PeerState{Addr: addr, Conn: conn, AmInterested: false, AmChoking: true, BitField: BitField{}}
 }
 
 func (s *Swarm) RemovePeer(addr string) {

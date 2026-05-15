@@ -22,7 +22,7 @@ type TrackerState struct {
 }
 
 func main() {
-	file, err := os.Open("test3.torrent")
+	file, err := os.Open("photo.torrent")
 	if err != nil {
 		fmt.Println("Error opening file:", err)
 		return

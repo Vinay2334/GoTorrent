@@ -110,6 +110,14 @@ func handlePeerMessages(conn net.Conn, pm *utils.PieceManager, fm *utils.FileMan
 	defer conn.Close()
 	choked := true
 
+	addr := conn.RemoteAddr().String()
+	peer, exists := swarm.Peers[addr]
+	if !exists {
+		swarm.AddPeer(addr, conn)
+		peer = swarm.Peers[addr]
+	}
+	defer swarm.RemovePeer(addr)
+
 	ticker := time.NewTicker(2 * time.Minute)
 	defer ticker.Stop()
 
@@ -140,7 +148,7 @@ func handlePeerMessages(conn net.Conn, pm *utils.PieceManager, fm *utils.FileMan
 				choked = true
 				fmt.Println("Peer choked us")
 			case MsgUnchoke:
-				index, found := pm.PickPiece(swarm.Peers[conn.RemoteAddr().String()].BitField)
+				index, found := pm.PickPiece(peer.BitField)
 				if found {
 					fmt.Printf("Peer unchoked us, requesting piece index %d\n", index)
 					for offset := int64(0); offset < pm.PieceLength; offset += 16384 {
@@ -161,9 +169,9 @@ func handlePeerMessages(conn net.Conn, pm *utils.PieceManager, fm *utils.FileMan
 				}
 			case MsgHave:
 				index := int(binary.BigEndian.Uint32(msg.Payload))
-				swarm.Peers[conn.RemoteAddr().String()].BitField.SetPiece(index)
+				peer.BitField.SetPiece(index)
 			case MsgBitfield:
-				swarm.Peers[conn.RemoteAddr().String()].BitField = utils.BitField(msg.Payload)
+				peer.BitField = utils.BitField(msg.Payload)
 			case MsgPiece:
 				if len(msg.Payload) < 8 {
 					fmt.Println("Payload too short for piece message")
@@ -232,12 +240,12 @@ func handlePeerMessages(conn net.Conn, pm *utils.PieceManager, fm *utils.FileMan
 				}
 
 			case MsgInterested:
-				swarm.SetMsgState(conn.RemoteAddr().String(), utils.MsgInterested, true)
+				swarm.SetMsgState(addr, utils.MsgInterested, true)
 				if swarm.CountUnchoked() < 4 {
 					fmt.Println("Peer is interested, sending unchoke")
 					unchokeMsg := []byte{0, 0, 0, 1, byte(utils.MsgUnchoke)}
 					conn.Write(unchokeMsg)
-					swarm.SetMsgState(conn.RemoteAddr().String(), utils.MsgUnchoke, false)
+					swarm.SetMsgState(addr, utils.MsgUnchoke, false)
 				}
 
 			case MsgRequest:
@@ -313,9 +321,6 @@ func StartPeerHandshake(addr string, infoHash [20]byte, peerID [20]byte, pm *uti
 	if err != nil {
 		return fmt.Errorf("failed to send interested message: %v", err)
 	}
-
-	swarm.AddPeer(addr, conn)
-	defer swarm.RemovePeer(addr)
 
 	handlePeerMessages(conn, pm, fm, peerChan, swarm)
 
